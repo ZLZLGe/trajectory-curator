@@ -77,12 +77,14 @@ def observed_tool_calls(record):
             continue
         calls = message.get('tool_calls')
         if isinstance(calls, list):
-            count += sum(isinstance(call, dict) and bool((call.get('function') or {}).get('name'))
-                         for call in calls)
+            for call in calls:
+                function = call.get('function') if isinstance(call, dict) else None
+                if isinstance(function, dict) and isinstance(function.get('name'), str) and function['name'].strip():
+                    count += 1
         content = message.get('content')
         if isinstance(content, list):
             count += sum(isinstance(block, dict) and block.get('type') in ('tool_use', 'server_tool_use')
-                         and bool(block.get('name')) for block in content)
+                         and isinstance(block.get('name'), str) and bool(block['name'].strip()) for block in content)
     return count
 
 

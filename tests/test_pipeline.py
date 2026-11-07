@@ -211,6 +211,13 @@ def test_actual_tool_calls_support_normalized_and_anthropic_messages():
     assert observed_tool_calls(raw) == 1
 
 
+def test_malformed_tool_structures_do_not_count_as_invocations():
+    raw = raw_record()
+    raw['messages'][2]['tool_calls'] = [None, {'function': 'run_tests'}, {'function': {'name': ''}}]
+    assert observed_tool_calls(raw) == 0
+    assert 'no_actual_tool_calls' in assess(raw)['rejection_reasons']
+
+
 def test_select_rejects_old_candidates_without_observed_tool_calls(tmp_path):
     raw = raw_record()
     item = {'trajectory_id': 'has-tools', **assess(raw), 'total_tool_calls': 1,
