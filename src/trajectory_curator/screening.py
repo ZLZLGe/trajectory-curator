@@ -6,7 +6,7 @@ from collections import Counter
 from .common import digest, dumps
 from .vendor.extraction import extract_user_turns
 
-VERSION = 'screening-v2'
+VERSION = 'screening-v3'
 ALLOWED_QUALITY_EXCEPTIONS = {'missing_tool_result', 'no_final_assistant_turn'}
 FRAMEWORK = re.compile(
     r'^\s*<(teammate-message|agent-message|task-notification|subagent_notification|'
@@ -16,7 +16,11 @@ COMPACTION = (
     'You are performing a CONTEXT CHECKPOINT COMPACTION.',
     'This session is being continued from a previous conversation',
     'You are resuming a prior conversation. Its earlier turns were archived',
+    'Your task is to create a detailed summary of the conversation so far, paying close attention',
 )
+SUGGESTION = '[SUGGESTION MODE: Suggest what the user might naturally type next into Claude Code.]'
+COMMAND_BLOCK = re.compile(r'<(command-name|command-message|command-args|local-command-stdout|local-command-caveat)\b[^>]*>(.*?)</\1>\s*', re.S)
+LOCAL_COMMANDS = {'model', 'clear', 'context', 'cost', 'help', 'login', 'logout', 'resume', 'compact', 'stats', 'status', 'usage'}
 AUXILIARY_PATTERNS = (
     r'(?:generate|write|produce|provide)[^.\n]{0,100}(?:title|session name)[^.\n]{0,80}(?:session|conversation|topic)',
     r'(?:generate|write|produce|provide)\s+(?:a\s+)?(?:concise|short)[^.\n]{0,70}title',
@@ -60,6 +64,30 @@ def nodes(record):
     yield record
     for child in (record.get('sub_agent_trajectory') or {}).values():
         yield from nodes(child)
+
+
+def caller_user_text(text, audit):
+    """Unwrap only a boundary-aligned CLI exporter envelope, retaining actual command tasks."""
+    text = text.strip()
+    if text.startswith(SUGGESTION):
+        audit['excluded_suggestion_mode'] = audit.get('excluded_suggestion_mode', 0) + 1
+        return ''
+    if not text.startswith(('<command-name>', '<command-message>')):
+        return text
+    command, queries = '', []
+    while (match := COMMAND_BLOCK.match(text)):
+        tag, body = match.groups()
+        if tag == 'command-name':
+            command = body.strip().lstrip('/')
+        elif tag == 'command-message' and not command:
+            command = body.strip().lstrip('/')
+        elif tag == 'command-args' and body.strip() and command not in LOCAL_COMMANDS:
+            queries.append(body.strip() if command == 'goal' else '/' + command + ' ' + body.strip())
+        audit['removed_cli_exporter_blocks'] = audit.get('removed_cli_exporter_blocks', 0) + 1
+        text = text[match.end():].lstrip()
+    if text:
+        queries.append(text)
+    return '\n'.join(queries).strip()
 
 
 def assess(record):
@@ -114,6 +142,7 @@ def assess(record):
         if FRAMEWORK.fullmatch(turn['text']):
             excluded_communication.append(turn['message_index'])
             continue
+        turn = {**turn, 'text': caller_user_text(turn['text'], extraction)}
         if turn['text'].startswith('<send_user_message_question_reply>'):
             match = re.search(r'<send_user_message_question_reply>(.*?)</send_user_message_question_reply>', turn['text'], re.S)
             try:
@@ -156,6 +185,7 @@ def assess(record):
     if not basetraj.get('source_key'):
         reasons.add('missing_source_identity')
     real_rounds = len({turn['message_index'] for turn in clean})
+    extraction['kept_user_turns'] = len(clean)
     first_query = clean[0]['text'] if clean else ''
     sid = meta.get('session_id')
     if sid and sid != 'no_session_id':

@@ -124,6 +124,25 @@ def test_segments_are_not_additional_user_messages():
     assert result['user_segments'] == 2
 
 
+def test_suggestion_mode_and_local_commands_are_not_real_users():
+    raw = raw_record()
+    raw['messages'] += [
+        {'role': 'user', 'content': '[SUGGESTION MODE: Suggest what the user might naturally type next into Claude Code.]\nPredict the next text.'},
+        {'role': 'user', 'content': '<command-name>/model</command-name><command-message>model</command-message><command-args>example</command-args><local-command-stdout>Set model</local-command-stdout>'}]
+    result = assess(raw)
+    assert result['real_user_rounds'] == 1
+    assert result['extraction_audit']['excluded_suggestion_mode'] == 1
+    assert result['extraction_audit']['removed_cli_exporter_blocks'] == 4
+
+
+def test_cli_goal_retains_task_and_clear_retains_following_request():
+    raw = raw_record()
+    raw['messages'][1]['content'] = '<command-name>/goal</command-name><command-message>goal</command-message><command-args>修复登录接口并测试</command-args>'
+    assert assess(raw)['user_turns'][0]['text'] == '修复登录接口并测试'
+    raw['messages'][1]['content'] = '<command-name>/clear</command-name><command-args></command-args><local-command-stdout></local-command-stdout>修复登录接口并测试'
+    assert assess(raw)['user_turns'][0]['text'] == '修复登录接口并测试'
+
+
 def test_incomplete_candidate_never_selected_as_complete():
     raw = raw_record()
     raw['normalization_audit']['reason_codes'] = ['missing_tool_result', 'no_final_assistant_turn']
