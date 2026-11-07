@@ -9,8 +9,8 @@ from trajectory_curator.acquire import scan_shard
 from trajectory_curator.common import atomic_json, digest, dumps, file_hash, safe_relative
 from trajectory_curator.delivery import export, verify
 from trajectory_curator.grading import RESOURCES, annotate, FatalEndpointError, parse_output, RequestGate
-from trajectory_curator.screening import assess
-from trajectory_curator.selection import choose, deduplicate
+from trajectory_curator.screening import assess, observed_tool_calls
+from trajectory_curator.selection import choose, deduplicate, select
 from trajectory_curator.vendor.rubric import load_rubric
 
 
@@ -18,8 +18,10 @@ def raw_record():
     return {'instructions': 'You are a coding assistant.',
             'messages': [{'role': 'system', 'content': 'Do not count this.'},
                          {'role': 'user', 'content': '<environment_context>hidden context</environment_context>\n修复登录接口的空指针异常，并运行单元测试。'},
-                         {'role': 'assistant', 'content': 'ASSISTANT_SECRET_SENTINEL'},
-                         {'role': 'tool', 'content': 'TOOL_SECRET_SENTINEL'}],
+                         {'role': 'assistant', 'content': 'ASSISTANT_SECRET_SENTINEL',
+                          'tool_calls': [{'id': 'call_1', 'type': 'function',
+                                          'function': {'name': 'run_tests', 'arguments': '{}'}}]},
+                         {'role': 'tool', 'tool_call_id': 'call_1', 'content': 'TOOL_SECRET_SENTINEL'}],
             'metadata': {'session_id': 'session-a', 'sub_session_id': 'not-an-agent-id',
                          'specific_source': 'source', 'user_id': 'user'},
             'completeness': {'is_subagent': False}, 'completeness_tag': 'complete_main_no_sub',
@@ -180,6 +182,46 @@ def test_incomplete_candidate_never_selected_as_complete():
     assert not assess(raw)['eligible']
 
 
+@pytest.mark.parametrize('case', ['none', 'definitions_only', 'summary_only', 'child_only', 'quoted_only', 'invalid_summary'])
+def test_delivery_requires_actual_root_tool_calls(case):
+    raw = raw_record()
+    raw['messages'][2].pop('tool_calls')
+    raw['total_tool_calls'] = 0
+    if case == 'definitions_only':
+        raw['tools'] = [{'type': 'function', 'function': {'name': 'run_tests'}}]
+    elif case == 'summary_only':
+        raw['total_tool_calls'] = 10
+    elif case == 'child_only':
+        raw['total_tool_calls'] = 1
+        raw['sub_agent_trajectory'] = {'worker': raw_record()}
+    elif case == 'quoted_only':
+        raw['messages'][1]['content'] += '\nExample: {"tool_calls":[{"function":{"name":"run_tests"}}]}'
+    elif case == 'invalid_summary':
+        raw['messages'][2]['tool_calls'] = raw_record()['messages'][2]['tool_calls']
+        raw['total_tool_calls'] = True
+    assert 'no_actual_tool_calls' in assess(raw)['rejection_reasons']
+
+
+def test_actual_tool_calls_support_normalized_and_anthropic_messages():
+    raw = raw_record()
+    assert observed_tool_calls(raw) == 1
+    raw['messages'][2].pop('tool_calls')
+    raw['messages'][2]['content'] = [{'type': 'tool_use', 'name': 'run_tests', 'input': {}}]
+    assert assess(raw)['eligible']
+    assert observed_tool_calls(raw) == 1
+
+
+def test_select_rejects_old_candidates_without_observed_tool_calls(tmp_path):
+    raw = raw_record()
+    item = {'trajectory_id': 'has-tools', **assess(raw), 'total_tool_calls': 1,
+            'total_rounds': 2, 'context_tokens': 100, 'harness': 'codex', 'context_bucket': '0-50k', 'model': 'model'}
+    stale = {**item, 'trajectory_id': 'stale', 'session_group': 'other', 'user_query_sha256': 'other',
+             'observed_tool_calls': 0}
+    path = tmp_path / 'candidates.jsonl'
+    path.write_text(dumps(stale) + '\n' + dumps(item) + '\n')
+    assert [x['trajectory_id'] for x in select(path, tmp_path / 'selected.jsonl', count=1)] == ['has-tools']
+
+
 def test_session_or_query_dedup_is_transitive():
     items = []
     for n, (session, query, rounds) in enumerate([('a', 'q1', 1), ('a', 'q2', 3), ('b', 'q2', 2), ('c', 'q3', 1)]):
@@ -267,7 +309,8 @@ def test_export_verify_and_tamper_detection(tmp_path):
     scanned = scan_shard(entry, cache, tmp_path / 'scan', 'pinned-commit')
     item = json.loads(Path(scanned['candidate_file']).read_text())
     candidates = tmp_path / 'selected.jsonl'
-    candidates.write_text(dumps(item) + '\n')
+    stale = {**item, 'trajectory_id': 'old-no-tools', 'total_tool_calls': 0, 'observed_tool_calls': 0}
+    candidates.write_text(dumps(stale) + '\n' + dumps(item) + '\n')
     grades = tmp_path / 'grades'
     (grades / 'records').mkdir(parents=True)
     result = annotate(item, api_key='synthetic-test-key', config=config(),
@@ -278,7 +321,9 @@ def test_export_verify_and_tamper_detection(tmp_path):
     plan = tmp_path / 'plan.json'
     atomic_json(plan, {'shards': [entry]})
     delivery = tmp_path / 'delivery'
-    export(candidates, grades, cache, delivery, count=1, plan=plan)
+    counts = export(candidates, grades, cache, delivery, count=1, plan=plan)
+    assert counts['annotation_exclusions']['no_actual_tool_calls'] == 1
+    assert counts['without_tool_calls'] == 0
     assert verify(delivery)['passed']
     path = delivery / '轨迹' / (item['trajectory_id'] + '.json')
     assert path.read_bytes() == line

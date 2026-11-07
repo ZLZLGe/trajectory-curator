@@ -63,7 +63,8 @@ def choose(items, count, seed='trajectory-curator-v1'):
 
 def select(candidates, output, count=1750, seed='trajectory-curator-v1'):
     all_items = list(read_jsonl(candidates))
-    complete = [i for i in all_items if i['eligible'] and i['root_complete'] and not i['quality_reason_codes']]
+    complete = [i for i in all_items if i['eligible'] and i['root_complete'] and not i['quality_reason_codes']
+                and i.get('total_tool_calls', 0) > 0 and i.get('observed_tool_calls', 0) > 0]
     unique = deduplicate(complete)
     selected = choose(unique, count, seed)
     output = Path(output)

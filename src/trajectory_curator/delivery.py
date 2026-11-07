@@ -24,6 +24,9 @@ def export(candidates, grades, cache, output, count=1500, plan=None):
     items = list(read_jsonl(candidates))
     chosen, records, excluded = [], {}, Counter()
     for item in items:
+        if item.get('total_tool_calls', 0) < 1 or item.get('observed_tool_calls', 0) < 1:
+            excluded['no_actual_tool_calls'] += 1
+            continue
         p = Path(grades) / 'records' / (item['trajectory_id'] + '.json')
         if not p.exists():
             excluded['not_annotated'] += 1
@@ -91,15 +94,18 @@ def export(candidates, grades, cache, output, count=1500, plan=None):
             hardest = max(active, key=lambda d: scores[d['id']])
             annotations.write(dumps({**result, 'real_user_rounds': item['real_user_rounds'],
                         'active_subtask_count': total_subtasks, 'primary_subtask_count': len(primary['subtasks']),
+                        'total_tool_calls': item['total_tool_calls'], 'observed_tool_calls': item['observed_tool_calls'],
                         'source': item['source'], 'harness': item['harness'], 'source_model': item['model']}) + '\n')
             users.write(dumps({k: item[k] for k in ('trajectory_id', 'source', 'user_turns', 'real_user_rounds',
                         'raw_user_messages', 'user_segments', 'user_query_characters', 'extraction_audit',
                         'user_query_sha256', 'is_subagent', 'identity_evidence', 'compaction_status',
-                        'screening_version', 'root_complete', 'quality_reason_codes', 'session_group')}) + '\n')
+                        'screening_version', 'root_complete', 'quality_reason_codes', 'session_group',
+                        'observed_tool_calls')}) + '\n')
             sources.write(dumps(source_rows[tid]) + '\n')
             flattened.append({'轨迹ID': tid, '轨迹文件': source_rows[tid]['relative_file'],
                     '真实用户轮数': item['real_user_rounds'], '原始user消息数': item['raw_user_messages'],
                     '工具调用数': item['total_tool_calls'], '原始total_rounds': item['total_rounds'],
+                    '根轨迹实际工具调用数': item['observed_tool_calls'],
                     '有效需求数': result['derived']['n_demands'], '内部子任务总数': total_subtasks,
                     '主需求子任务数': len(primary['subtasks']),
                     '难度等级': result['derived']['max_difficulty_level'],
@@ -137,6 +143,7 @@ def export(candidates, grades, cache, output, count=1500, plan=None):
     files = {name: {'sha256': file_hash(output / name), 'bytes': (output / name).stat().st_size}
              for name in ('难度分级.csv', '难度分级.jsonl', '真实用户轮次.jsonl', '来源清单.jsonl')}
     atomic_json(output / 'manifest.json', {'schema_version': 1, 'created_at': now(), **counts, 'files': files,
+                'screening_policy': {'minimum_total_tool_calls': 1, 'minimum_observed_root_tool_calls': 1},
                 'source_revision': chosen[0]['source']['revision'], 'candidate_sha256': file_hash(candidates),
                 'judge_config': json.loads((Path(grades) / 'config.json').read_text()),
                 'reference_versions': json.loads((RESOURCES / 'upstream.json').read_text())})
@@ -175,11 +182,14 @@ def verify(output):
         again = assess(raw)
         if not again['eligible'] or not again['root_complete'] or again['quality_reason_codes']:
             raise ValueError('delivery_screening_failed')
-        for key in ('real_user_rounds', 'user_turns', 'user_query_sha256', 'session_group', 'screening_version'):
+        for key in ('real_user_rounds', 'user_turns', 'user_query_sha256', 'session_group', 'screening_version',
+                    'observed_tool_calls'):
             if again[key] != user[key]:
                 raise ValueError('user_extraction_mismatch:' + key)
         if not accepted_result(user, result) or result['real_user_rounds'] != user['real_user_rounds']:
             raise ValueError('annotation_not_accepted')
+        if result['observed_tool_calls'] != again['observed_tool_calls'] or result['total_tool_calls'] != raw['total_tool_calls']:
+            raise ValueError('tool_count_mismatch')
         validate_output(result['model_output'], [t['turn_id'] for t in user['user_turns']], rubric)
         if derive(result['model_output'], rubric) != result['derived']:
             raise ValueError('difficulty_recalculation_mismatch')
@@ -204,13 +214,16 @@ def verify(output):
         for key, value in {'真实用户轮数': user['real_user_rounds'], '有效需求数': result['derived']['n_demands'],
                            '内部子任务总数': result['active_subtask_count'],
                            '难度等级': result['derived']['max_difficulty_level'],
-                           '难度分数': result['derived']['max_difficulty_score']}.items():
+                           '难度分数': result['derived']['max_difficulty_score'],
+                           '工具调用数': result['total_tool_calls'],
+                           '根轨迹实际工具调用数': result['observed_tool_calls']}.items():
             if str(value) != row[key]:
                 raise ValueError('csv_value_mismatch:' + key)
     report = {'passed': True, 'verified_trajectories': expected, 'verified_at': now(),
               'checks': ['source_line_sha256', 'sidecar_ids', 'session_and_query_deduplication',
                          'subagent_compaction_and_quality_rescreen', 'real_user_turn_reextraction',
                          'model_json_schema', 'difficulty_recalculation', 'subtask_counts',
-                         'full_user_input_hash', 'pinned_prompt_and_rubric', 'csv_integrity']}
+                         'full_user_input_hash', 'pinned_prompt_and_rubric', 'csv_integrity',
+                         'every_trajectory_has_actual_root_tool_calls']}
     atomic_json(output / '校验报告.json', report)
     return report

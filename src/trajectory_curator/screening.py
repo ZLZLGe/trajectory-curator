@@ -6,7 +6,7 @@ from collections import Counter
 from .common import digest, dumps
 from .vendor.extraction import extract_user_turns
 
-VERSION = 'screening-v4'
+VERSION = 'screening-v5-tool-required'
 ALLOWED_QUALITY_EXCEPTIONS = {'missing_tool_result', 'no_final_assistant_turn'}
 FRAMEWORK = re.compile(
     r'^\s*<(teammate-message|agent-message|task-notification|subagent_notification|'
@@ -67,6 +67,23 @@ def nodes(record):
     yield record
     for child in (record.get('sub_agent_trajectory') or {}).values():
         yield from nodes(child)
+
+
+def observed_tool_calls(record):
+    """Count explicit assistant tool invocations in the root transcript, never definitions or quoted text."""
+    count = 0
+    for message in record.get('messages', []):
+        if not isinstance(message, dict) or message.get('role') != 'assistant':
+            continue
+        calls = message.get('tool_calls')
+        if isinstance(calls, list):
+            count += sum(isinstance(call, dict) and bool((call.get('function') or {}).get('name'))
+                         for call in calls)
+        content = message.get('content')
+        if isinstance(content, list):
+            count += sum(isinstance(block, dict) and block.get('type') in ('tool_use', 'server_tool_use')
+                         and bool(block.get('name')) for block in content)
+    return count
 
 
 def caller_user_text(text, audit):
@@ -225,6 +242,10 @@ def assess(record):
         reasons.add('missing_root_identity_assessment')
     if not basetraj.get('source_key'):
         reasons.add('missing_source_identity')
+    observed_calls = observed_tool_calls(record)
+    declared_calls = record.get('total_tool_calls')
+    if type(declared_calls) is not int or declared_calls < 1 or observed_calls < 1:
+        reasons.add('no_actual_tool_calls')
     real_rounds = len({turn['message_index'] for turn in clean})
     extraction['kept_user_turns'] = len(clean)
     first_query = clean[0]['text'] if clean else ''
@@ -246,4 +267,5 @@ def assess(record):
         'session_group': digest(dumps(group).encode()),
         'user_query_sha256': digest(dumps([t['text'] for t in clean]).encode()),
         'screening_version': VERSION,
+        'observed_tool_calls': observed_calls,
     }
