@@ -1,0 +1,51 @@
+{
+  "repository": "damowangdongdong/traj2env",
+  "revision": "bc1b28a216c1ed068860e8f4886440ff9b7c5163",
+  "files": [
+    {
+      "source_path": "分类/trajectory_judge/extraction.py",
+      "local_path": "vendor/extraction.py",
+      "sha256": "f1e4a9cf45161b28eec9b5e9b8b1c3c789f87ce05a59e6d6ed98bade7b39c89f"
+    },
+    {
+      "source_path": "需求判定/demand_judge/inputs.py",
+      "local_path": "vendor/inputs.py",
+      "sha256": "e6e3a5d520ccf7b0bae7b8f9cc7beb8e8b89515e643f0e43dd3ca00a48d83aa2"
+    },
+    {
+      "source_path": "需求判定/demand_judge/storage.py",
+      "local_path": "vendor/storage.py",
+      "sha256": "186404d8dcf575a3320f9a975c78c3f8c7832bc7a14bb8c3eac4a6033d8be40a"
+    },
+    {
+      "source_path": "需求判定/demand_judge/rubric.py",
+      "local_path": "vendor/rubric.py",
+      "sha256": "e904d7029bb4144e78a1c2dc072c4be3bdc5bb020c76c34bc417c69e5c0fe6c6"
+    },
+    {
+      "source_path": "需求判定/demand_judge/scoring.py",
+      "local_path": "vendor/scoring.py",
+      "sha256": "ff98c916f76a132a7bea2ed255f53e0226f59a84a101fab911eb95d0631919aa"
+    },
+    {
+      "source_path": "需求判定/demand_judge/validation.py",
+      "local_path": "vendor/validation.py",
+      "sha256": "d8a38a41d89073012ec570c12317fa4612b33188aa6335449d853d48ae8c3233"
+    },
+    {
+      "source_path": "需求判定/prompts/demand_judge_system.md",
+      "local_path": "resources/demand_judge_system.md",
+      "sha256": "434806968e3536f518de618b91414a9dd4ca53c4092ca498ad8959055fd59763"
+    },
+    {
+      "source_path": "需求判定/configs/rubric.json",
+      "local_path": "resources/rubric.json",
+      "sha256": "4f4fee59827095a6a8cba9e8c520bd5ab1c0f86cb6afb5249124010c405d8104"
+    }
+  ],
+  "additional_reference": {
+    "repository": "ZLZLGe/duanyanonlinedataprocessing-dev",
+    "revision": "9a59b1ea044c355b42c7cf6c764e6830efa1065f",
+    "notes": "Protocol-aware user extraction; direct compaction boundary evidence; secondary/peer labels do not prove subagent identity."
+  }
+}
