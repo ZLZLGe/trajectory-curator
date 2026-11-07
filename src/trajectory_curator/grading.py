@@ -21,6 +21,22 @@ from .vendor.validation import validate_output
 RESOURCES = Path(__file__).parent / 'resources'
 
 
+class RequestGate:
+    """Space attempts (including retries) across all worker threads."""
+    def __init__(self, per_minute=60):
+        self.interval = 60 / per_minute if per_minute > 0 else 0
+        self.lock = threading.Lock()
+        self.next_start = 0
+
+    def wait(self):
+        with self.lock:
+            current = time.monotonic()
+            delay = max(0, self.next_start - current)
+            self.next_start = max(current, self.next_start) + self.interval
+        if delay:
+            time.sleep(delay)
+
+
 def parse_output(content):
     if not isinstance(content, str) or not content.strip():
         raise ValueError('empty_model_output')
@@ -59,6 +75,7 @@ def annotate(item, *, api_key, config, rubric, system, post=requests.post, stop=
                 raise FatalEndpointError('batch_stopped')
             attempt = {'semantic_attempt': semantic + 1, 'network_attempt': retry + 1, 'max_tokens': max_tokens}
             t0 = time.monotonic()
+            retry_after = 0
             try:
                 response = post(config['endpoint'], json=body,
                                 headers={'Authorization': 'Bearer ' + api_key}, timeout=(30, 600))
@@ -77,6 +94,12 @@ def annotate(item, *, api_key, config, rubric, system, post=requests.post, stop=
                 else:
                     last_error = 'HTTP_' + str(response.status_code)
                     attempt['outcome'] = last_error
+                    try:
+                        retry_after = min(60, max(0, float(getattr(response, 'headers', {}).get('Retry-After', 0))))
+                    except (ValueError, TypeError):
+                        retry_after = 0
+                    if response.status_code == 429:
+                        retry_after = max(10, retry_after)
                     if response.status_code not in (408, 409, 425, 429) and response.status_code < 500:
                         retry = 4
             except FatalEndpointError:
@@ -91,7 +114,7 @@ def annotate(item, *, api_key, config, rubric, system, post=requests.post, stop=
                 break
             if retry == 4:
                 break
-            time.sleep(min(30, 2 ** retry) * random.uniform(.8, 1.2))
+            time.sleep(max(retry_after, min(30, 2 ** retry) * random.uniform(.8, 1.2)))
         if response_data is None:
             break
         for k in ('prompt_tokens', 'completion_tokens', 'total_tokens'):
@@ -129,7 +152,7 @@ def annotate(item, *, api_key, config, rubric, system, post=requests.post, stop=
 
 
 def grade(candidates, output, *, endpoint, model='glm-5.3', reasoning_effort='high',
-          workers=16, api_key=None, limit=None):
+          workers=16, api_key=None, limit=None, requests_per_minute=60):
     api_key = api_key or os.environ.get('CURATOR_API_KEY')
     if not api_key:
         raise ValueError('set_CURATOR_API_KEY')
@@ -158,6 +181,11 @@ def grade(candidates, output, *, endpoint, model='glm-5.3', reasoning_effort='hi
         raise ValueError('output_configuration_mismatch')
     atomic_json(config_path, config)
     stop = threading.Event()
+    gate = RequestGate(requests_per_minute)
+
+    def paced_post(*args, **kwargs):
+        gate.wait()
+        return requests.post(*args, **kwargs)
 
     def one(item):
         path = output / 'records' / (item['trajectory_id'] + '.json')
@@ -167,7 +195,7 @@ def grade(candidates, output, *, endpoint, model='glm-5.3', reasoning_effort='hi
                     and old['judge']['config_sha256'] == config_hash):
                 return old, True
         result = annotate(item, api_key=api_key, config=config, rubric=rubric,
-                          system=prompt.read_text(), stop=stop)
+                          system=prompt.read_text(), stop=stop, post=paced_post)
         atomic_json(path, result)
         return result, False
 

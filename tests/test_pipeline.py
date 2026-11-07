@@ -8,7 +8,7 @@ import pytest
 from trajectory_curator.acquire import scan_shard
 from trajectory_curator.common import atomic_json, digest, dumps, file_hash, safe_relative
 from trajectory_curator.delivery import export, verify
-from trajectory_curator.grading import RESOURCES, annotate, FatalEndpointError, parse_output
+from trajectory_curator.grading import RESOURCES, annotate, FatalEndpointError, parse_output, RequestGate
 from trajectory_curator.screening import assess
 from trajectory_curator.selection import choose, deduplicate
 from trajectory_curator.vendor.rubric import load_rubric
@@ -139,6 +139,33 @@ def test_cli_goal_retains_task_and_clear_retains_following_request():
     raw = raw_record()
     raw['messages'][1]['content'] = '<command-name>/goal</command-name><command-message>goal</command-message><command-args>修复登录接口并测试</command-args>'
     assert assess(raw)['user_turns'][0]['text'] == '修复登录接口并测试'
+
+
+def test_claude_naming_prompt_is_auxiliary_even_after_generic_main_identity():
+    raw = raw_record()
+    raw['instructions'] = "You are Claude Code, Anthropic's official CLI for Claude.You are naming a coding session so the user can pick it out."
+    assert 'auxiliary_model_call' in assess(raw)['rejection_reasons']
+
+
+@pytest.mark.parametrize('text', [
+    '[SYSTEM NOTIFICATION - NOT USER INPUT]\nNo human input has been received.',
+    'Base directory for this skill: /tmp/skills/example\n# Injected skill instructions',
+    '[Request interrupted by user]\n<local-command-caveat>not a user request</local-command-caveat>',
+    '<bash-input>pwd</bash-input><bash-stdout>/tmp</bash-stdout><bash-stderr></bash-stderr>'])
+def test_caller_framework_messages_do_not_inflate_user_rounds(text):
+    raw = raw_record()
+    raw['messages'].append({'role': 'user', 'content': text})
+    assert assess(raw)['real_user_rounds'] == 1
+
+
+def test_interrupt_and_ide_context_removal_preserves_real_request():
+    raw = raw_record()
+    raw['messages'][1]['content'] = ('[Request interrupted by user for tool use]\n'
+        '<ide_opened_file>The user opened a file.</ide_opened_file>修复登录接口并测试')
+    result = assess(raw)
+    assert result['real_user_rounds'] == 1
+    assert result['user_turns'][0]['text'] == '修复登录接口并测试'
+    assert result['extraction_audit']['removed_interrupt_markers'] == 1
     raw['messages'][1]['content'] = '<command-name>/clear</command-name><command-args></command-args><local-command-stdout></local-command-stdout>修复登录接口并测试'
     assert assess(raw)['user_turns'][0]['text'] == '修复登录接口并测试'
 
@@ -194,6 +221,30 @@ def test_authentication_failure_is_fatal():
     with pytest.raises(FatalEndpointError, match='HTTP_401'):
         annotate(item, api_key='synthetic-test-key', config=config(), rubric=load_rubric(RESOURCES / 'rubric.json'),
                  system='rules', post=lambda *a, **kw: response)
+
+
+def test_request_gate_spaces_all_attempts(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr('trajectory_curator.grading.time.monotonic', lambda: 100)
+    monkeypatch.setattr('trajectory_curator.grading.time.sleep', sleeps.append)
+    gate = RequestGate(60)
+    for _ in range(3):
+        gate.wait()
+    assert sleeps == [1, 2]
+
+
+def test_rate_limit_honors_retry_after(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr('trajectory_curator.grading.time.sleep', sleeps.append)
+    limited = Response('')
+    limited.status_code = 429
+    limited.headers = {'Retry-After': '30'}
+    responses = iter([limited, Response(dumps(output_json()))])
+    item = {'trajectory_id': 'sample', **assess(raw_record())}
+    result = annotate(item, api_key='synthetic-test-key', config=config(), rubric=load_rubric(RESOURCES / 'rubric.json'),
+                      system='rules', post=lambda *a, **kw: next(responses))
+    assert result['status'] == 'success'
+    assert sleeps == [30]
 
 
 def test_strict_json_rejects_duplicate_keys_and_unsafe_paths():

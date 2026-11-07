@@ -6,7 +6,7 @@ from collections import Counter
 from .common import digest, dumps
 from .vendor.extraction import extract_user_turns
 
-VERSION = 'screening-v3'
+VERSION = 'screening-v4'
 ALLOWED_QUALITY_EXCEPTIONS = {'missing_tool_result', 'no_final_assistant_turn'}
 FRAMEWORK = re.compile(
     r'^\s*<(teammate-message|agent-message|task-notification|subagent_notification|'
@@ -21,7 +21,10 @@ COMPACTION = (
 SUGGESTION = '[SUGGESTION MODE: Suggest what the user might naturally type next into Claude Code.]'
 COMMAND_BLOCK = re.compile(r'<(command-name|command-message|command-args|local-command-stdout|local-command-caveat)\b[^>]*>(.*?)</\1>\s*', re.S)
 LOCAL_COMMANDS = {'model', 'clear', 'context', 'cost', 'help', 'login', 'logout', 'resume', 'compact', 'stats', 'status', 'usage'}
+INTERRUPTED = re.compile(r'^\s*\[Request interrupted by user(?: for tool use)?\]\s*', re.I)
+IDE_BLOCK = re.compile(r'<(ide_opened_file|ide_selection|bash-input|bash-stdout|bash-stderr)\b[^>]*>.*?</\1>\s*', re.S)
 AUXILIARY_PATTERNS = (
+    r'you are naming a coding session\b',
     r'(?:generate|write|produce|provide)[^.\n]{0,100}(?:title|session name)[^.\n]{0,80}(?:session|conversation|topic)',
     r'(?:generate|write|produce|provide)\s+(?:a\s+)?(?:concise|short)[^.\n]{0,70}title',
     r'you are[^.\n]{0,100}(?:summari[sz]er|notification (?:classifier|assistant)|security (?:reviewer|monitor|classifier))',
@@ -90,6 +93,34 @@ def caller_user_text(text, audit):
     return '\n'.join(queries).strip()
 
 
+def caller_content(content, audit):
+    """Normalize explicit caller framing before the pinned user extractor sees it."""
+    if isinstance(content, list):
+        return [caller_content(block, audit) for block in content]
+    if isinstance(content, dict):
+        if content.get('type', '') in ('text', 'input_text', '') and isinstance(content.get('text'), str):
+            return {**content, 'text': caller_content(content['text'], audit)}
+        return content
+    if not isinstance(content, str):
+        return content
+    text = content.lstrip()
+    while (interrupted := INTERRUPTED.match(text)):
+        audit['removed_interrupt_markers'] += 1
+        text = text[interrupted.end():].lstrip()
+    for prefix, reason in (
+            ('[SYSTEM NOTIFICATION - NOT USER INPUT]', 'excluded_system_notification'),
+            ('Base directory for this skill:', 'excluded_skill_expansion'),
+            ('[Your previous response had no visible output. Please continue and produce a user-visible response.]',
+             'excluded_automatic_retry_prompt')):
+        if text.startswith(prefix):
+            audit[reason] += 1
+            return ''
+    while (block := IDE_BLOCK.match(text)):
+        audit['removed_ide_or_local_bash_blocks'] += 1
+        text = text[block.end():].lstrip()
+    return text
+
+
 def assess(record):
     reasons, evidence = set(), []
     meta = record.get('metadata', {})
@@ -130,7 +161,13 @@ def assess(record):
         if metadata.get('is_compaction') or metadata.get('epoch_cause') == 'compaction' or metadata.get('compaction'):
             reasons.add('compaction_history_incomplete')
             evidence.append('explicit_compaction_metadata')
-    raw_turns, extraction = extract_user_turns(record)
+    caller_audit = Counter()
+    query_record = {**record, 'messages': [
+        {**message, 'content': caller_content(message.get('content'), caller_audit)}
+        if isinstance(message, dict) and message.get('role') == 'user' else message
+        for message in record.get('messages', [])]}
+    raw_turns, extraction = extract_user_turns(query_record)
+    extraction.update(caller_audit)
     if extraction.get('unwrapped_delegation_input'):
         reasons.add('subagent')
         evidence.append('delegation_after_framework_removal')
@@ -143,6 +180,10 @@ def assess(record):
             excluded_communication.append(turn['message_index'])
             continue
         turn = {**turn, 'text': caller_user_text(turn['text'], extraction)}
+        if turn['text'].lstrip().startswith(COMPACTION):
+            reasons.add('compaction_history_incomplete')
+            evidence.append('continuation_after_caller_framing_removal')
+            continue
         if turn['text'].startswith('<send_user_message_question_reply>'):
             match = re.search(r'<send_user_message_question_reply>(.*?)</send_user_message_question_reply>', turn['text'], re.S)
             try:

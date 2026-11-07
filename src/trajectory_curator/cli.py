@@ -37,6 +37,7 @@ def main():
     p.add_argument('--model', default='glm-5.3')
     p.add_argument('--reasoning-effort', default='high', choices=['low', 'high', 'max'])
     p.add_argument('--workers', type=int, default=16)
+    p.add_argument('--requests-per-minute', type=int, default=60)
     p.add_argument('--limit', type=int)
     p = commands.add_parser('export', help='剔除标注失败/待复核项并导出原始轨迹和标注侧车')
     p.add_argument('--candidates', required=True)

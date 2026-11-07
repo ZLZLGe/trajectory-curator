@@ -99,6 +99,7 @@ def export(candidates, grades, cache, output, count=1500, plan=None):
             sources.write(dumps(source_rows[tid]) + '\n')
             flattened.append({'轨迹ID': tid, '轨迹文件': source_rows[tid]['relative_file'],
                     '真实用户轮数': item['real_user_rounds'], '原始user消息数': item['raw_user_messages'],
+                    '工具调用数': item['total_tool_calls'], '原始total_rounds': item['total_rounds'],
                     '有效需求数': result['derived']['n_demands'], '内部子任务总数': total_subtasks,
                     '主需求子任务数': len(primary['subtasks']),
                     '难度等级': result['derived']['max_difficulty_level'],
@@ -129,6 +130,8 @@ def export(candidates, grades, cache, output, count=1500, plan=None):
               'single_user_round': sum(i['real_user_rounds'] == 1 for i in chosen),
               'multi_user_round': sum(i['real_user_rounds'] > 1 for i in chosen),
               'total_real_user_rounds': sum(i['real_user_rounds'] for i in chosen),
+              'with_tool_calls': sum(i['total_tool_calls'] > 0 for i in chosen),
+              'without_tool_calls': sum(i['total_tool_calls'] == 0 for i in chosen),
               'total_active_demands': sum(row['有效需求数'] for row in flattened),
               'total_active_subtasks': sum(row['内部子任务总数'] for row in flattened)}
     files = {name: {'sha256': file_hash(output / name), 'bytes': (output / name).stat().st_size}
