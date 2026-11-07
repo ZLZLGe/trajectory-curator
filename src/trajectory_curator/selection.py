@@ -6,9 +6,10 @@ from pathlib import Path
 from .common import atomic_json, digest, dumps, file_hash, read_jsonl
 
 
-def deduplicate(items):
+def deduplicate(items, preferred_ids=None):
     """Collapse connected duplicate sessions OR identical full user-query sequences."""
     parent = list(range(len(items)))
+    preferred_ids = set(preferred_ids or ())
 
     def find(i):
         while parent[i] != i:
@@ -28,7 +29,8 @@ def deduplicate(items):
         groups[find(i)].append(item)
 
     def priority(item):
-        return (item['root_complete'], not item['quality_reason_codes'], item['real_user_rounds'],
+        return (item['root_complete'], not item['quality_reason_codes'], item['trajectory_id'] in preferred_ids,
+                item['real_user_rounds'],
                 item['total_rounds'], item['total_tool_calls'], item['context_tokens'], item['trajectory_id'])
 
     return [max(group, key=priority) for group in groups.values()]

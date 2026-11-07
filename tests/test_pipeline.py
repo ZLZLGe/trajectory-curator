@@ -231,6 +231,7 @@ def test_session_or_query_dedup_is_transitive():
                       'harness': 'codex', 'context_bucket': '0-50k', 'model': 'model'})
     unique = deduplicate(items)
     assert {i['trajectory_id'] for i in unique} == {'1', '3'}
+    assert {i['trajectory_id'] for i in deduplicate(items, preferred_ids={'2'})} == {'2', '3'}
     assert choose(unique, 2) == choose(list(reversed(unique)), 2)
 
 
