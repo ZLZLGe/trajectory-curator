@@ -4,23 +4,34 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trajectory-curator"
-version = "0.1.0"
-description = "Download, screen and grade reproducible agent trajectory datasets"
-requires-python = ">=3.10"
+version = "0.2.0"
+description = "Independent tools for trajectory curation and scenario, capability, and subject classification"
+readme = "README.md"
+requires-python = ">=3.11"
 dependencies = ["requests>=2.31"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+classification = ["orjson>=3.10", "pydantic>=2.9,<3"]
+s3 = ["boto3>=1.35,<2"]
+dev = ["pytest>=8", "build>=1.2", "ruff>=0.12"]
 
 [project.scripts]
 trajectory-curator = "trajectory_curator.cli:main"
+trajectory-classifier = "trajectory_classifier.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 trajectory_curator = ["resources/*.md", "resources/*.json"]
+trajectory_classifier = ["resources/*.md", "resources/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "BLE", "C4"]

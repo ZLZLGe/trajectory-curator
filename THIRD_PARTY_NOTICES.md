@@ -1,7 +1,11 @@
 # 参考与固定版本
 
-`src/trajectory_curator/vendor/` 和需求判定资源文件来自用户指定的私有仓库 `damowangdongdong/traj2env`，commit `bc1b28a216c1ed068860e8f4886440ff9b7c5163`。
+`src/trajectory_curator/vendor/` 和需求判定资源文件固定自 `damowangdongdong/traj2env`，commit `bc1b28a216c1ed068860e8f4886440ff9b7c5163`。
 
 这些文件保持上游原文；来源路径和内容哈希记录在 `resources/upstream.json`。本仓库新增筛选、下载、选样、模型调用及交付封装，协议判定还参考 `ZLZLGe/duanyanonlinedataprocessing-dev` 的指定版本。
 
-本仓库作为私有项目保存相关代码与来源信息。数据集内容与凭据另行存储。
+`src/trajectory_classifier/` 的分类核心及 `_contract/` 兼容层抽取自 `ZLZLGe/trajfoundry` 的已验证工作树，分类器版本为 `2026-11-09.2`，Prompt 为 `v006-toolcall-scenario-capability-subject`。逐文件来源、原始 SHA256 与基线 commit 保存在 `src/trajectory_classifier/resources/upstream.json`；其中包含基线 commit 之后的限流等工作树改动，不能仅用 commit 号替代该快照。
+
+分类包在本仓库内调整命名空间、打包、通用配置及本地目录适配；保留原分类政策、标签目录、Prompt 和校验算法。原 TrajFoundry 仓库及其生产部署不属于本仓库的运行依赖。
+
+本仓库只保存代码、固定资源、合成测试和使用说明；数据集内容、凭据、生产配置及运行结果另行存储。上述来源记录用于说明各部分来历，不改变上游代码或数据的授权条件。

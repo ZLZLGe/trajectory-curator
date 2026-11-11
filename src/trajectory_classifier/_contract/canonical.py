@@ -1,0 +1,173 @@
+"""Canonical serialization and provenance-independent hashes."""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Iterable
+from typing import Any
+
+from .audit_codes import RESPONSES_UNSUPPORTED_CALL_EVIDENCE
+from .identity import normalize_session_id
+from .json_codec import dumps
+from .models import CompactionRecord, Message, Severity, TrajectoryNode
+from .output_contract import project_message, project_trajectory
+from .window_identity import sessionless_window
+
+
+def canonical_json(value: Any) -> bytes:
+    return dumps(value, sort_keys=True)
+
+
+def message_fingerprint(message: Message) -> str:
+    payload = project_message(message)
+    return hashlib.sha256(canonical_json(payload)).hexdigest()
+
+
+def compaction_record_key(record: CompactionRecord) -> tuple[int, int, bytes]:
+    """Return the stable provider-position order for opaque compaction items."""
+
+    return (
+        0 if record.origin == "history" else 1,
+        record.item_index,
+        canonical_json(record.item),
+    )
+
+
+def canonical_compaction_records(
+    records: Iterable[CompactionRecord],
+) -> list[CompactionRecord]:
+    """Deduplicate exact replay records without interpreting their contents."""
+
+    unique: dict[bytes, CompactionRecord] = {}
+    for record in records:
+        encoded = canonical_json(record.model_dump(mode="json", exclude_none=False))
+        unique.setdefault(encoded, record)
+    return sorted(unique.values(), key=compaction_record_key)
+
+
+def compaction_signature(records: Iterable[CompactionRecord]) -> bytes:
+    """Return an exact, position-sensitive opaque-context signature."""
+
+    ordered = canonical_compaction_records(records)
+    return canonical_json(
+        [record.model_dump(mode="json", exclude_none=False) for record in ordered]
+    )
+
+
+def _semantic_provider_evidence(
+    node: TrajectoryNode,
+) -> dict[str, list[dict[str, str]]]:
+    audit = node.normalization_audit
+    if audit is None:
+        return {}
+    responses_rejections = {
+        (issue.path, issue.detail)
+        for issue in audit.issues
+        if issue.code == RESPONSES_UNSUPPORTED_CALL_EVIDENCE
+        and issue.stage == "responses"
+        and issue.severity == Severity.WARNING
+    }
+    if not responses_rejections:
+        return {}
+    return {
+        RESPONSES_UNSUPPORTED_CALL_EVIDENCE: [
+            {"path": path, "detail": detail}
+            for path, detail in sorted(responses_rejections)
+        ]
+    }
+
+
+def semantic_payload(
+    node: TrajectoryNode, *, sessionless_window_hours: int = 0
+) -> dict[str, Any]:
+    if type(sessionless_window_hours) is not int or sessionless_window_hours not in (
+        0,
+        8,
+    ):
+        raise ValueError("sessionless_window_hours must be 0 or 8")
+    # Use the same field projection as persisted and published trajectories.
+    # Completeness is deliberately omitted because it is derived below the
+    # semantic identity boundary.
+    has_completeness = (
+        node.completeness_tag is not None or node.completeness is not None
+    )
+    payload = project_trajectory(node, top_level=has_completeness)
+    provider_evidence = _semantic_provider_evidence(node)
+    issue_codes = {
+        issue.code
+        for issue in (
+            node.normalization_audit.issues if node.normalization_audit else ()
+        )
+    }
+    aggregation_identity = {
+        "user_id": {
+            "value": node.metadata.user_id or "no_user_id",
+            "synthesized": (
+                not node.metadata.user_id
+                or "metadata_user_id_synthesized" in issue_codes
+            ),
+        },
+        "session_id": {
+            "value": node.metadata.session_id or "no_session_id",
+            "synthesized": (
+                not node.metadata.session_id
+                or "metadata_session_id_synthesized" in issue_codes
+            ),
+        },
+    }
+    if sessionless_window_hours and (
+        not normalize_session_id(node.metadata.session_id)
+        or ("metadata_session_id_synthesized" in issue_codes)
+    ):
+        window = sessionless_window(node.metadata.created_at)
+        if window:
+            aggregation_identity["sessionless_window"] = window
+    if "metadata_session_id_masked" in issue_codes:
+        # A redacted session token is shared by unrelated captures. Preserve
+        # source identity in the semantic hash so those captures cannot be
+        # collapsed after their aggregation scopes have been separated.
+        aggregation_identity["masked_source"] = node.metadata.source_file
+    for key in (
+        "source",
+        "metadata",
+        "normalization_audit",
+        "completeness",
+        "completeness_tag",
+        "total_rounds",
+        "total_tool_calls",
+        "total_tokens",
+        "tool_counts",
+        "reasoning_total_tokens",
+        "tool_defs_tag",
+        "missing_tool_defs",
+        "tool_call_tag",
+        "tool_call_check",
+    ):
+        payload.pop(key, None)
+    if provider_evidence:
+        payload["provider_evidence"] = provider_evidence
+    # Identity is not file provenance. Keeping it in the semantic key prevents
+    # identical conversations from different users or sessions from collapsing
+    # into one stored row whose metadata can represent only one of them. The
+    # synthesized bit keeps a missing identity distinct from a real provider id
+    # whose literal value happens to equal a public no_* sentinel.
+    payload["aggregation_identity"] = aggregation_identity
+    children = payload.get("sub_agent_trajectory")
+    if isinstance(children, dict):
+        payload["sub_agent_trajectory"] = {
+            call_id: semantic_payload(
+                (node.sub_agent_trajectory or {})[call_id],
+                sessionless_window_hours=sessionless_window_hours,
+            )
+            for call_id in sorted(children)
+        }
+    return payload
+
+
+def trajectory_id(node: TrajectoryNode, *, sessionless_window_hours: int = 0) -> str:
+    """Hash using the writer's policy or an explicitly selected reader policy."""
+    return hashlib.sha256(
+        canonical_json(
+            semantic_payload(node, sessionless_window_hours=sessionless_window_hours)
+        )
+    ).hexdigest()

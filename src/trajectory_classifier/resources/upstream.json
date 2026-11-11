@@ -1,0 +1,150 @@
+{
+  "repository": "ZLZLGe/trajfoundry",
+  "base_commit": "ef291ae87f20ec9998641fa34c6dfe3861a4a902",
+  "classifier_revision": "2026-11-09.2",
+  "prompt_version": "v006-toolcall-scenario-capability-subject",
+  "snapshot_note": "Source SHA256 values describe the tested working-tree snapshot, including shared rate-limit changes that were not part of base_commit. Adaptations only affect this repository.",
+  "files": [
+    {
+      "source_path": "src/trajfoundry/classification/classifier.py",
+      "source_sha256": "e02c675a2cad5c916608c230aa9cedc5e19de5e70f608be394b606e03765f5db",
+      "local_path": "src/trajectory_classifier/classifier.py"
+    },
+    {
+      "source_path": "src/trajfoundry/classification/client.py",
+      "source_sha256": "6163b8f59a3b02d6b9d96372d700230bf45f57470d4eadbf5d271364c571ff2c",
+      "local_path": "src/trajectory_classifier/client.py"
+    },
+    {
+      "source_path": "src/trajfoundry/classification/cache.py",
+      "source_sha256": "dc03bb9ebbdc644993956a468945fc32157da6c431673c0b3ad0b3175686a907",
+      "local_path": "src/trajectory_classifier/cache.py"
+    },
+    {
+      "source_path": "src/trajfoundry/classification/input_projection.py",
+      "source_sha256": "c98d3cddb219afab377c2e822e0931550c2f60d8f396080b447c5ca11fc4b345",
+      "local_path": "src/trajectory_classifier/input_projection.py"
+    },
+    {
+      "source_path": "src/trajfoundry/classification/rate_limit.py",
+      "source_sha256": "f40c0c4828f02af0112941edcd553f61adb4fd7b436dead20554bceb0e8f3b10",
+      "local_path": "src/trajectory_classifier/rate_limit.py"
+    },
+    {
+      "source_path": "src/trajfoundry/classification/taxonomy.py",
+      "source_sha256": "dc58f4ce3754049544453511cf8d45ca21f6a9b3a4ce602f86345b274bf220fc",
+      "local_path": "src/trajectory_classifier/taxonomy.py"
+    },
+    {
+      "source_path": "src/trajfoundry/classification/taxonomy.json",
+      "source_sha256": "87203ce176ba454d3e7171e08abaf8d4611af349ee845a273824e428e4427cf1",
+      "local_path": "src/trajectory_classifier/resources/taxonomy.json"
+    },
+    {
+      "source_path": "src/trajfoundry/classification/__init__.py",
+      "source_sha256": "300fbe205651ba26f2eacda3a21aee2fb5294485e613ce0bf5bccdf41c64b768",
+      "local_path": "src/trajectory_classifier/__init__.py"
+    },
+    {
+      "source_path": "src/trajfoundry/audit_codes.py",
+      "source_sha256": "0898f90a53679c73e6030f6d32ecce01dde281036ea2aae5c30b9e1b20a7fa77",
+      "local_path": "src/trajectory_classifier/_contract/audit_codes.py"
+    },
+    {
+      "source_path": "src/trajfoundry/canonical.py",
+      "source_sha256": "74a95939bc59e734b6c7924ab3b8d6b329f7f0e3ea544b4f8e6676c4f4c7b04f",
+      "local_path": "src/trajectory_classifier/_contract/canonical.py"
+    },
+    {
+      "source_path": "src/trajfoundry/identity.py",
+      "source_sha256": "05653f4ca7315e62b55c2c6ba39b6fe758a0a6f324cace4c34b65c0f2cfced67",
+      "local_path": "src/trajectory_classifier/_contract/identity.py"
+    },
+    {
+      "source_path": "src/trajfoundry/json_codec.py",
+      "source_sha256": "4f3de5bf59dfac4bd5433e69b199078ee07e6346a371bec163cdf3eddd00e25c",
+      "local_path": "src/trajectory_classifier/_contract/json_codec.py"
+    },
+    {
+      "source_path": "src/trajfoundry/models.py",
+      "source_sha256": "4e2d437e087a874f4d02358a5b189d5596cc3f4dbd6fd0254b1dc2d964a4eafd",
+      "local_path": "src/trajectory_classifier/_contract/models.py"
+    },
+    {
+      "source_path": "src/trajfoundry/output_contract.py",
+      "source_sha256": "68da24ad4f9d17a71f3321a6c67d9959a455ce76bb6d2609daabde1ad3c07d21",
+      "local_path": "src/trajectory_classifier/_contract/output_contract.py"
+    },
+    {
+      "source_path": "src/trajfoundry/quality.py",
+      "source_sha256": "9212f678f465f6efd1edecbf135e358ace3846843be3c8ba2d6f77c1e846938a",
+      "local_path": "src/trajectory_classifier/_contract/quality.py"
+    },
+    {
+      "source_path": "src/trajfoundry/tool_names.py",
+      "source_sha256": "c9a4ce6ae0e9677d4844027ba39e875607bfe9d206597a371f14c61e44b6ad08",
+      "local_path": "src/trajectory_classifier/_contract/tool_names.py"
+    },
+    {
+      "source_path": "src/trajfoundry/validation.py",
+      "source_sha256": "74bc925435dc892c8e501444837590a6f8107a4f1d61c04fd56523b4d00cdda2",
+      "local_path": "src/trajectory_classifier/_contract/validation.py"
+    },
+    {
+      "source_path": "src/trajfoundry/window_identity.py",
+      "source_sha256": "6ad7239ec3925dbf86225455d77c52869db0c76358ea083e6c5bba3c4b90dc81",
+      "local_path": "src/trajectory_classifier/_contract/window_identity.py"
+    },
+    {
+      "source_path": "src/trajfoundry/export.py",
+      "source_sha256": "cd66a7db6f2a4bfa2fe9a5fb1419e92f0490dd1287703d4b2d22978cb259e6e1",
+      "local_path": "src/trajectory_classifier/_contract/filenames.py",
+      "extracted_symbols": [
+        "_session_was_synthesized",
+        "trajectory_filename"
+      ]
+    },
+    {
+      "source_path": "src/trajfoundry/credentials.py",
+      "source_sha256": "05ddcae6d48e7200ee9c9ac1bbb31171f70b1e70b92b5ec6de4a871e3395fd5b",
+      "local_path": "src/trajectory_classifier/credentials.py"
+    },
+    {
+      "source_path": "src/trajfoundry/s3_validation.py",
+      "source_sha256": "0c2ba354027530a37ecac4fb15e6357907bd7e2d16e2d9da96f10aaebd2e6b2b",
+      "local_path": "src/trajectory_classifier/s3_validation.py"
+    },
+    {
+      "source_path": "src/trajfoundry/label_jobs.py",
+      "source_sha256": "a8190fd71d35e4fc53f399a059e61e07eeaebed73e81784cd73ac33cf5752e63",
+      "local_path": "src/trajectory_classifier/jobs.py"
+    },
+    {
+      "source_path": "tests/test_classification.py",
+      "source_sha256": "dfc18b59872e32435ce8d7df72517a8d48a6e9019a69652dbf4ec69f2b8ab151",
+      "local_path": "tests/classification/test_classifier.py"
+    },
+    {
+      "source_path": "tests/test_classification_rate_limit.py",
+      "source_sha256": "9d1349521ef2ff123045b94d3c82ed4cbc01267fe59ac09c7b203aee4ada582c",
+      "local_path": "tests/classification/test_rate_limit.py"
+    },
+    {
+      "source_path": "tests/test_label_jobs.py",
+      "source_sha256": "5fc5d4de0ed424935e63beb75e0d2a1f24e3b99b26b66c55aa92fdedc8b062bd",
+      "local_path": "tests/classification/test_s3_jobs.py"
+    },
+    {
+      "source_path": "src/trajfoundry/s3.py",
+      "source_sha256": "d8c5a6f7f89998986da1847830eade57e72c17c3a0b7233d520a5f4b3a8a6e1c",
+      "local_path": "src/trajectory_classifier/storage.py",
+      "extracted_symbols": [
+        "S3Location",
+        "_validate_bucket",
+        "_validate_path_segments",
+        "create_s3_client",
+        "parse_s3_uri"
+      ]
+    }
+  ]
+}

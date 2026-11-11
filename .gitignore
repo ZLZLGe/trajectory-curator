@@ -16,3 +16,9 @@ cache/
 *.parquet
 *.key
 *.pem
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.ruff_cache/
+.trajectory-classifier-cache/
+classifier_rate_limit.json*
