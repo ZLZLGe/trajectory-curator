@@ -6,7 +6,7 @@ from collections import Counter
 from .common import digest, dumps
 from .vendor.extraction import extract_user_turns
 
-VERSION = 'screening-v5-tool-required'
+VERSION = 'screening-v6-confirmed-compaction'
 ALLOWED_QUALITY_EXCEPTIONS = {'missing_tool_result', 'no_final_assistant_turn'}
 FRAMEWORK = re.compile(
     r'^\s*<(teammate-message|agent-message|task-notification|subagent_notification|'
@@ -177,7 +177,9 @@ def assess(record):
             reasons.add('compaction_history_uncertain')
             evidence.append('compaction_items_present')
         metadata = node.get('metadata', {})
-        if metadata.get('is_compaction') or metadata.get('epoch_cause') == 'compaction' or metadata.get('compaction'):
+        compaction = metadata.get('compaction')
+        confirmed = compaction is True or isinstance(compaction, dict) and compaction.get('confirmed') is True
+        if metadata.get('is_compaction') is True or metadata.get('epoch_cause') == 'compaction' or confirmed:
             reasons.add('compaction_history_incomplete')
             evidence.append('explicit_compaction_metadata')
     caller_audit = Counter()

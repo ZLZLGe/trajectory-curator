@@ -15,5 +15,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -e '.[classification,s3,dev]'
       - run: python -m pytest -q
-      - run: python -m ruff check src/trajectory_classifier tests/classification examples/classification src/trajectory_os tests/os examples/os
+      - run: python -m ruff check src/trajectory_classifier src/trajectory_curator/coverage.py tests/classification examples/classification src/trajectory_os tests/os examples/os
       - run: python -m build

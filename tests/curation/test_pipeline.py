@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from trajectory_curator.acquire import scan_shard
-from trajectory_curator.common import atomic_json, digest, dumps, file_hash, safe_relative
-from trajectory_curator.delivery import export, verify
-from trajectory_curator.grading import RESOURCES, annotate, FatalEndpointError, parse_output, RequestGate
+from trajectory_curator.common import atomic_json, dumps, file_hash, safe_relative
+from trajectory_curator.delivery import accepted_result, export, verify
+from trajectory_curator.grading import RESOURCES, annotate, FatalEndpointError, grade, parse_output, RequestGate
 from trajectory_curator.screening import assess, observed_tool_calls
 from trajectory_curator.selection import choose, deduplicate, select
 from trajectory_curator.vendor.rubric import load_rubric
@@ -109,6 +109,46 @@ def test_compaction_requires_explicit_boundary(change):
     else:
         raw['compaction_items'] = [{'summary': 'earlier context'}]
     assert any(r.startswith('compaction_') for r in assess(raw)['rejection_reasons'])
+
+
+@pytest.mark.parametrize('metadata, rejected', [
+    ({'compaction': {'confirmed': False}}, False),
+    ({'compaction': False}, False),
+    ({'compaction': {}}, False),
+    ({'compaction': {'confirmed': 'false'}}, False),
+    ({'is_compaction': False, 'epoch_cause': 'system_change', 'epoch_index': 1}, False),
+    ({'compaction': True}, True),
+    ({'compaction': {'confirmed': True}}, True),
+    ({'compaction': {'confirmed': False}, 'is_compaction': True}, True),
+    ({'compaction': {'confirmed': False}, 'epoch_cause': 'compaction'}, True),
+])
+def test_compaction_metadata_requires_positive_confirmation(metadata, rejected):
+    raw = raw_record()
+    raw['metadata'].update(metadata)
+    result = assess(raw)
+    assert result['eligible'] is not rejected
+    assert ('explicit_compaction_metadata' in result['identity_evidence']) is rejected
+
+
+@pytest.mark.parametrize('confirmed', [False, True])
+def test_child_compaction_metadata_uses_same_confirmation_rule(confirmed):
+    raw = raw_record()
+    raw['completeness_tag'] = 'complete_main_with_complete_sub'
+    child = raw_record()
+    child['completeness']['is_subagent'] = True
+    child['metadata']['compaction'] = {'confirmed': confirmed}
+    raw['sub_agent_trajectory'] = {'child': child}
+    result = assess(raw)
+    assert result['eligible'] is not confirmed
+    assert not result['is_subagent']
+
+
+def test_unconfirmed_metadata_does_not_override_continuation_summary():
+    raw = raw_record()
+    raw['metadata']['compaction'] = {'confirmed': False}
+    raw['messages'].append({'role': 'user', 'content':
+        'This session is being continued from a previous conversation that ran out of context. Summary: prior work'})
+    assert 'compaction_history_incomplete' in assess(raw)['rejection_reasons']
 
 
 def test_title_generation_auxiliary_call_is_excluded():
@@ -264,6 +304,109 @@ def test_annotation_sends_only_users_and_corrects_invalid_enum():
     assert 'INVENTED_LABEL' in calls[1]['messages'][-2]['content']
 
 
+def annotate_turns(texts, output=None):
+    raw = raw_record()
+    raw['messages'].extend({'role': 'user', 'content': text} for text in texts)
+    item = {'trajectory_id': 'sample', **assess(raw)}
+    result = annotate(item, api_key='synthetic-test-key', config=config(),
+                      rubric=load_rubric(RESOURCES / 'rubric.json'), system='rules',
+                      post=lambda *a, **kw: Response(dumps(output if output is not None else output_json())))
+    return item, result
+
+
+@pytest.mark.parametrize('text', ['另一个独立任务：撰写一份完整的产品市场分析报告。', '加测试', '继续修复支付接口'])
+def test_unreferenced_request_requires_review_and_cannot_be_delivered(text):
+    item, result = annotate_turns([text])
+    assert result['status'] == 'success'
+    assert result['model_output']['needs_review']
+    assert 'u0002' in result['model_output']['review_reason']
+    assert result['coverage_audit']['uncovered_turn_ids'] == ['u0002']
+    assert not accepted_result(item, result)
+
+
+@pytest.mark.parametrize('reply', ['好的。', '继续', 'A', '谢谢！', 'OK.', '进度如何？'])
+def test_known_non_demand_reply_does_not_require_a_demand_reference(reply):
+    item, result = annotate_turns([reply])
+    assert not result['model_output']['needs_review']
+    assert result['coverage_audit']['exempt_turn_ids'] == ['u0002']
+    assert accepted_result(item, result)
+
+
+@pytest.mark.parametrize('referenced_id', ['u0001', 'u0002'])
+def test_collapsed_consecutive_duplicates_share_coverage(referenced_id):
+    output = output_json()
+    output['demands'][0]['source_turns'] = [referenced_id]
+    item, result = annotate_turns(['修复登录接口的空指针异常，并运行单元测试。'], output)
+    assert result['input_stats']['duplicate_turns_merged'] == 1
+    assert result['coverage_audit']['uncovered_turn_ids'] == []
+    assert accepted_result(item, result)
+
+
+def test_nonconsecutive_repeated_request_still_requires_a_reference():
+    output = output_json()
+    output['demands'][0]['source_turns'].append('u0002')
+    _, result = annotate_turns(['先取消这个修复任务。', '修复登录接口的空指针异常，并运行单元测试。'], output)
+    assert result['coverage_audit']['uncovered_turn_ids'] == ['u0003']
+    assert result['model_output']['needs_review']
+
+
+def test_cancelled_demand_counts_as_accounted_for():
+    output = output_json()
+    output['demands'].append({**copy.deepcopy(output['demands'][0]), 'id': 'D2',
+        'summary': '已取消的市场报告', 'source_turns': ['u0002'], 'status': 'cancelled',
+        'relation': {'type': 'independent', 'to': None}, 'difficulty': None})
+    item, result = annotate_turns(['原先提过的市场报告取消，不做了。'], output)
+    assert accepted_result(item, result)
+
+
+def test_coverage_review_preserves_model_review_reason():
+    output = output_json()
+    output.update(needs_review=True, review_reason='需求边界需人工确认')
+    _, result = annotate_turns(['加测试'], output)
+    assert result['model_output']['review_reason'].startswith('需求边界需人工确认; ')
+    assert 'u0002' in result['model_output']['review_reason']
+
+
+def test_cached_legacy_annotation_is_rechecked_without_model_calls(tmp_path, monkeypatch):
+    item, _ = annotate_turns(['另一个独立任务：撰写完整的市场分析报告。'])
+    candidates = tmp_path / 'candidates.jsonl'
+    candidates.write_text(dumps(item) + '\n')
+    output = tmp_path / 'grades'
+    monkeypatch.setattr('trajectory_curator.grading.requests.post', lambda *a, **kw: Response(dumps(output_json())))
+    kwargs = {'endpoint': 'https://example.invalid/chat/completions', 'api_key': 'synthetic-test-key'}
+    assert grade(candidates, output, **kwargs)['needs_review'] == 1
+    path = output / 'records/sample.json'
+    cached = json.loads(path.read_text())
+    cached.pop('coverage_audit')
+    cached['model_output'].update(needs_review=False, review_reason='')
+    atomic_json(path, cached)
+
+    def no_request(*args, **kwargs):
+        pytest.fail('cached annotations must be checked locally')
+
+    monkeypatch.setattr('trajectory_curator.grading.requests.post', no_request)
+    counts = grade(candidates, output, **kwargs)
+    assert counts['cache_hits'] == 1 and counts['needs_review'] == 1
+    checked = json.loads(path.read_text())
+    assert checked['coverage_audit']['uncovered_turn_ids'] == ['u0002']
+    assert not accepted_result(item, checked)
+    grade(candidates, output, **kwargs)
+    assert json.loads(path.read_text()) == checked
+
+
+def test_export_rechecks_coverage_of_legacy_results(tmp_path):
+    item, result = annotate_turns(['另一个独立任务：撰写完整的市场分析报告。'])
+    item.update(total_tool_calls=1)
+    result.pop('coverage_audit')
+    result['model_output'].update(needs_review=False, review_reason='')
+    candidates = tmp_path / 'candidates.jsonl'
+    candidates.write_text(dumps(item) + '\n')
+    grades = tmp_path / 'grades'
+    atomic_json(grades / 'records/sample.json', result)
+    with pytest.raises(ValueError, match='insufficient_accepted_annotations:0<1'):
+        export(candidates, grades, tmp_path / 'cache', tmp_path / 'delivery', count=1)
+
+
 def test_authentication_failure_is_fatal():
     response = Response('')
     response.status_code = 401
@@ -305,8 +448,11 @@ def test_strict_json_rejects_duplicate_keys_and_unsafe_paths():
             safe_relative(p)
 
 
-def test_export_verify_and_tamper_detection(tmp_path):
+@pytest.mark.parametrize('legacy_missing_turn', [False, True])
+def test_export_verify_and_tamper_detection(tmp_path, legacy_missing_turn):
     raw = raw_record()
+    if legacy_missing_turn:
+        raw['messages'].append({'role': 'user', 'content': '新增一个独立的报表导出功能。'})
     cache = tmp_path / 'cache'
     cache.mkdir()
     line = (dumps(raw) + '\n').encode()
@@ -321,9 +467,12 @@ def test_export_verify_and_tamper_detection(tmp_path):
     candidates.write_text(dumps(stale) + '\n' + dumps(item) + '\n')
     grades = tmp_path / 'grades'
     (grades / 'records').mkdir(parents=True)
+    model_output = output_json()
+    if legacy_missing_turn:
+        model_output['demands'][0]['source_turns'].append('u0002')
     result = annotate(item, api_key='synthetic-test-key', config=config(),
                       rubric=load_rubric(RESOURCES / 'rubric.json'), system='rules',
-                      post=lambda *a, **kw: Response(dumps(output_json())))
+                      post=lambda *a, **kw: Response(dumps(model_output)))
     atomic_json(grades / 'records' / (item['trajectory_id'] + '.json'), result)
     atomic_json(grades / 'config.json', config())
     plan = tmp_path / 'plan.json'
@@ -333,11 +482,45 @@ def test_export_verify_and_tamper_detection(tmp_path):
     assert counts['annotation_exclusions']['no_actual_tool_calls'] == 1
     assert counts['without_tool_calls'] == 0
     assert verify(delivery)['passed']
+    if legacy_missing_turn:
+        annotation_path = delivery / '难度分级.jsonl'
+        annotation = json.loads(annotation_path.read_text())
+        annotation.pop('coverage_audit')
+        annotation['model_output']['demands'][0]['source_turns'] = ['u0001']
+        annotation_path.write_text(dumps(annotation) + '\n')
+        manifest_path = delivery / 'manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        manifest['files']['难度分级.jsonl'] = {
+            'sha256': file_hash(annotation_path), 'bytes': annotation_path.stat().st_size}
+        atomic_json(manifest_path, manifest)
+        with pytest.raises(ValueError, match='annotation_not_accepted'):
+            verify(delivery)
+        return
     path = delivery / '轨迹' / (item['trajectory_id'] + '.json')
     assert path.read_bytes() == line
     path.write_bytes(line + b' ')
     with pytest.raises(ValueError, match='original_trajectory_hash_mismatch'):
         verify(delivery)
+
+
+def test_scan_recomputes_old_compaction_rejections(tmp_path):
+    raw = raw_record()
+    raw['metadata']['compaction'] = {'confirmed': False}
+    shard = tmp_path / 'shard.jsonl.gz'
+    with gzip.open(shard, 'wb') as handle:
+        handle.write((dumps(raw) + '\n').encode())
+    entry = {'path': shard.name, 'bytes': shard.stat().st_size, 'sha256': file_hash(shard), 'rows': 1}
+    first = scan_shard(entry, tmp_path, tmp_path / 'scan', 'pinned-commit')
+    assert first['eligible'] == 1
+    candidate = Path(first['candidate_file'])
+    candidate.write_text('')
+    marker = candidate.with_suffix('.summary.json')
+    legacy = {**first, 'eligible': 0, 'candidate_sha256': file_hash(candidate),
+              'identity': {**first['identity'], 'screening_version': 'screening-v5-tool-required'}}
+    atomic_json(marker, legacy)
+    rescanned = scan_shard(entry, tmp_path, tmp_path / 'scan', 'pinned-commit')
+    assert rescanned['eligible'] == 1
+    assert json.loads(candidate.read_text())['compaction_status'] == 'no_observed_boundary'
 
 
 def test_vendored_files_match_pinned_hashes():

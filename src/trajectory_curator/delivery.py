@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from .common import atomic_json, digest, dumps, file_hash, now, read_jsonl, safe_relative
+from .coverage import assess_coverage
 from .grading import RESOURCES
 from .screening import assess
 from .vendor.inputs import build_payload, normalize_item
@@ -17,7 +18,8 @@ from .vendor.validation import validate_output
 def accepted_result(item, record):
     return (record.get('status') == 'success' and not record['model_output']['needs_review']
             and record['derived']['n_demands'] > 0
-            and item['user_query_sha256'] == record['user_query_sha256'])
+            and item['user_query_sha256'] == record['user_query_sha256']
+            and not assess_coverage(item['user_turns'], record['model_output'])['uncovered_turn_ids'])
 
 
 def export(candidates, grades, cache, output, count=1500, plan=None):
@@ -222,7 +224,7 @@ def verify(output):
     report = {'passed': True, 'verified_trajectories': expected, 'verified_at': now(),
               'checks': ['source_line_sha256', 'sidecar_ids', 'session_and_query_deduplication',
                          'subagent_compaction_and_quality_rescreen', 'real_user_turn_reextraction',
-                         'model_json_schema', 'difficulty_recalculation', 'subtask_counts',
+                         'model_json_schema', 'user_turn_demand_coverage', 'difficulty_recalculation', 'subtask_counts',
                          'full_user_input_hash', 'pinned_prompt_and_rubric', 'csv_integrity',
                          'every_trajectory_has_actual_root_tool_calls']}
     atomic_json(output / '校验报告.json', report)

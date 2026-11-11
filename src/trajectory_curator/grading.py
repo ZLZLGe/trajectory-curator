@@ -12,6 +12,7 @@ from pathlib import Path
 import requests
 
 from .common import atomic_json, digest, dumps, file_hash, now, read_jsonl
+from .coverage import with_coverage_review
 from .vendor.inputs import build_payload, normalize_item
 from .vendor.rubric import load_rubric
 from .vendor.scoring import derive
@@ -139,12 +140,13 @@ def annotate(item, *, api_key, config, rubric, system, post=requests.post, stop=
                 messages = messages + [{'role': 'assistant', 'content': content or ''},
                             {'role': 'user', 'content': '输出未通过校验：' + last_error + '。请修正并重新输出完整 JSON。'}]
             continue
-        return {'trajectory_id': item['trajectory_id'], 'status': 'success', 'model_output': obj,
+        result = {'trajectory_id': item['trajectory_id'], 'status': 'success', 'model_output': obj,
                 'derived': derive(obj, rubric), 'input_stats': stats, 'input_sha256': input_hash,
                 'user_query_sha256': item['user_query_sha256'], 'judge': {**config,
                 'attempts': attempts, 'usage_total': dict(usage), 'response_id': response_data.get('id'),
                 'response_model': response_data.get('model'), 'elapsed_seconds': round(time.monotonic() - start, 3)},
                 'completed_at': now()}
+        return with_coverage_review(result, item['user_turns'])
     return {'trajectory_id': item['trajectory_id'], 'status': 'error', 'error': last_error,
             'input_sha256': input_hash, 'user_query_sha256': item['user_query_sha256'],
             'judge': {**config, 'attempts': attempts, 'usage_total': dict(usage),
@@ -193,7 +195,11 @@ def grade(candidates, output, *, endpoint, model='glm-5.3', reasoning_effort='hi
             old = json.loads(path.read_text())
             if (old['status'] == 'success' and old['user_query_sha256'] == item['user_query_sha256']
                     and old['judge']['config_sha256'] == config_hash):
-                return old, True
+                validate_output(old['model_output'], [t['turn_id'] for t in item['user_turns']], rubric)
+                checked = with_coverage_review(old, item['user_turns'])
+                if checked != old:
+                    atomic_json(path, checked)
+                return checked, True
         result = annotate(item, api_key=api_key, config=config, rubric=rubric,
                           system=prompt.read_text(), stop=stop, post=paced_post)
         atomic_json(path, result)
