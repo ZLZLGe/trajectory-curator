@@ -1,0 +1,32 @@
+{
+  "source": "Local BaseTraj OS classification implementation",
+  "source_directory": "/data/basetraj-upload/os-v1",
+  "snapshot_date": "2026-11-11",
+  "note": "Hashes identify the source snapshot; source_directory is provenance, not a runtime dependency.",
+  "files": [
+    {
+      "source_path": "runtime_os.py",
+      "source_sha256": "975e971a98dbe392e02ea3a33fee74b11eaa34befcf9a0706b9921b8201d805d",
+      "local_path": "src/trajectory_os/runtime_os.py",
+      "adaptation": "Formatting only; runtime evidence and decision rules preserved."
+    },
+    {
+      "source_path": "session_inference.py",
+      "source_sha256": "1f3b93627ec62e4c063e81d9e74beb5309eec29d0909a53a20294a4d63d941b2",
+      "local_path": "src/trajectory_os/session_inference.py",
+      "adaptation": "Original session_key and refine functions preserved; add an in-memory session-map builder."
+    },
+    {
+      "source_path": "refine_sessions.py",
+      "source_sha256": "4ea7c2118e7b5ec37169bb27829827bf06ce6e6b2b1bbd745fa766bd45264e4f",
+      "local_path": "src/trajectory_os/session_inference.py",
+      "adaptation": "Extract unanimous direct-evidence aggregation into build_session_map; read original records instead of run-specific index files and validate metadata.session_id directly."
+    },
+    {
+      "source_path": "test_runtime_os.py",
+      "source_sha256": "ad1e2dd54cab04dfeb5ba902b2be2424990cdd928ece21dbdac58233ed43dfa4",
+      "local_path": "tests/os/test_runtime_os.py",
+      "adaptation": "Update package imports and formatting; preserve all 18 original regression tests."
+    }
+  ]
+}

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "trajectory-curator"
 version = "0.2.0"
-description = "Independent tools for trajectory curation and scenario, capability, and subject classification"
+description = "Independent tools for trajectory curation, semantic classification, and runtime OS classification"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["requests>=2.31"]
@@ -25,6 +25,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 trajectory_curator = ["resources/*.md", "resources/*.json"]
 trajectory_classifier = ["resources/*.md", "resources/*.json"]
+trajectory_os = ["resources/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
